@@ -142,16 +142,26 @@ def cli():
 
 @cli.command()
 @click.option(
-    "--input-dir",
+    "--source-dir",
+    "source_dir",
     default="data/chat_source",
     show_default=True,
-    help="Directory containing .opus audio files.",
+    help="Directory containing .opus audio files (the chat source directory).",
+)
+@click.option(
+    "--output-base-dir",
+    "output_base_dir",
+    default="data",
+    show_default=True,
+    help="Base directory under which the generated output directory "
+         "(named <model_name>-<timestamp>) will be created.",
 )
 @click.option(
     "--output-dir",
+    "output_dir",
     default=None,
-    help="Directory to write .txt transcriptions to. "
-         "Defaults to data/<model_name>-<timestamp>.",
+    help="Explicit directory to write .txt transcriptions to. "
+         "If not set, defaults to <output-base-dir>/<model_name>-<timestamp>.",
 )
 @click.option(
     "--dry-run/--no-dry-run",
@@ -199,7 +209,8 @@ def cli():
     help="Number of files to transcribe concurrently using a thread pool.",
 )
 def transcribe(
-    input_dir,
+    source_dir,
+    output_base_dir,
     output_dir,
     dry_run,
     beam_size,
@@ -209,13 +220,13 @@ def transcribe(
     num_workers,
     jobs,
 ):
-    """Transcribe .opus files in INPUT_DIR to .txt files."""
+    """Transcribe .opus files in SOURCE_DIR to .txt files."""
     model_name = "tiny" if dry_run else "large-v3"
 
     if output_dir is None:
-        output_dir = f"data/{model_name}-{get_timestamp()}"
+        output_dir = join(output_base_dir, f"{model_name}-{get_timestamp()}")
 
-    files = [f for f in listdir(input_dir) if isfile(join(input_dir, f))]
+    files = [f for f in listdir(source_dir) if isfile(join(source_dir, f))]
     opus_files = [f for f in files if f.split(".")[-1] == "opus" and len(f.split(".")) == 2]
 
     os.makedirs(output_dir, exist_ok=True)
@@ -228,7 +239,7 @@ def transcribe(
     )
 
     def process(file):
-        in_path = join(input_dir, file)
+        in_path = join(source_dir, file)
         text = transcribe_audio(model, in_path, beam_size=beam_size, vad_filter=vad_filter)
         txt_filename = file.split(".")[0] + ".txt"
         out_path = join(output_dir, txt_filename)
@@ -250,36 +261,89 @@ def transcribe(
 
 @cli.command(name="replace-audios")
 @click.option(
-    "--input-file",
-    default="data/chat_source/chat_log.txt",
+    "--source-dir",
+    "source_dir",
+    default="data/chat_source",
     show_default=True,
-    help="Path to the raw WhatsApp chat log file.",
+    help="Directory containing the raw WhatsApp chat log file (and originally-referenced media).",
+)
+@click.option(
+    "--input-file",
+    "input_file",
+    default=None,
+    help="Path to the raw WhatsApp chat log file. "
+         "Defaults to <source-dir>/chat_log.txt.",
+)
+@click.option(
+    "--input-filename",
+    "input_filename",
+    default="chat_log.txt",
+    show_default=True,
+    help="Filename of the chat log inside --source-dir "
+         "(used only if --input-file is not explicitly set).",
 )
 @click.option(
     "--transcription-path",
+    "transcription_path",
     required=True,
     help="Directory containing the transcribed .txt files (output of `transcribe`).",
 )
 @click.option(
+    "--output-dir",
+    "output_dir",
+    default=None,
+    help="Directory to write the output chat log into. "
+         "Defaults to --transcription-path.",
+)
+@click.option(
     "--output-file",
+    "output_file",
     default=None,
     help="Path to write the output chat log with transcriptions. "
-         "Defaults to <transcription-path>/chat_out.txt.",
+         "Defaults to <output-dir>/chat_out.txt.",
+)
+@click.option(
+    "--output-filename",
+    "output_filename",
+    default="chat_out.txt",
+    show_default=True,
+    help="Filename for the output chat log inside --output-dir "
+         "(used only if --output-file is not explicitly set).",
 )
 @click.option(
     "--from-date",
+    "from_date",
     default=None,
     help="Only include lines at/after this datetime, format YYYY-MM-DDTHH:MM.",
 )
 @click.option(
     "--to-date",
+    "to_date",
     default=None,
     help="Only include lines at/before this datetime, format YYYY-MM-DDTHH:MM.",
 )
-def replace_audios(input_file, transcription_path, output_file, from_date, to_date):
+def replace_audios(
+    source_dir,
+    input_file,
+    input_filename,
+    transcription_path,
+    output_dir,
+    output_file,
+    output_filename,
+    from_date,
+    to_date,
+):
     """Replace '(file attached)' opus references in a chat log with transcriptions."""
+    if input_file is None:
+        input_file = join(source_dir, input_filename)
+
+    if output_dir is None:
+        output_dir = transcription_path
+
     if output_file is None:
-        output_file = join(transcription_path, "chat_out.txt")
+        output_file = join(output_dir, output_filename)
+
+    os.makedirs(output_dir, exist_ok=True)
 
     from_dt = parse_cli_datetime(from_date) if from_date else None
     to_dt = parse_cli_datetime(to_date) if to_date else None
